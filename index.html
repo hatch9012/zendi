@@ -5257,9 +5257,9 @@
         const KAKAO_CONFIG = {
             // ⚠️ 실제 서비스 시 여기에 REST API 키 입력
             // 발급 방법: 카카오 개발자사이트 > 앱 만들기 > REST API 키 복사
-            REST_API_KEY: '', // 예: '1a2b3c4d5e6f7g8h9i0j...'
+            REST_API_KEY: '1d5d63722735f92aff1032c26eae37d4', // 사용자 제공 기본 키 (localStorage에 저장된 값이 있으면 그쪽이 우선)
             ENDPOINT: 'https://dapi.kakao.com/v2/local/search/keyword.json',
-            ENABLED: false // API 키 입력 시 true로 변경
+            ENABLED: true // 기본 키가 설정됨
         };
 
         // 지역별 중심 좌표 (카카오맵 검색용)
