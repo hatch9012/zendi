@@ -1132,10 +1132,32 @@
         .timeline-item[draggable="true"]:active {
             cursor: grabbing;
         }
+        /* 🆕 v13.4: 진짜 드래그 같은 시각 효과 */
+        .timeline-item[data-place-index] {
+            transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), 
+                        box-shadow 0.2s ease,
+                        opacity 0.2s ease;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        /* 단, 체류시간 ✏️ 편집 클릭은 가능해야 하므로 .editable-stay는 제외 */
+        .timeline-item .editable-stay {
+            -webkit-user-select: auto;
+            user-select: auto;
+            -webkit-touch-callout: default;
+        }
         .timeline-item.dragging {
-            opacity: 0.4;
-            transform: scale(0.97);
-            box-shadow: 0 8px 24px rgba(24,95,165,0.25);
+            opacity: 0.95;
+            box-shadow: 0 12px 32px rgba(24,95,165,0.4),
+                        0 0 0 2px #185fa5;
+            z-index: 100;
+            cursor: grabbing !important;
+            transition: box-shadow 0.15s ease, opacity 0.15s ease;
+            /* transform은 JS에서 직접 제어 (translateY + scale + rotate) */
         }
         .timeline-item.drag-over-top {
             border-top: 3px dashed #185fa5;
@@ -8758,6 +8780,7 @@
                 }
                 
                 handle.addEventListener('pointerdown', (e) => {
+                    // 🆕 v13.3: iOS Safari가 long-press를 가로채지 않도록 적극 차단
                     e.preventDefault();
                     e.stopPropagation();
                     
@@ -8778,13 +8801,36 @@
                     };
                     
                     item.classList.add('dragging');
+                    // 🆕 v13.4: 드래그 시작 즉시 살짝 떠오르는 효과
+                    item.style.transform = 'scale(1.03) rotate(-1deg)';
+                    item.style.transition = 'transform 0.15s ease, box-shadow 0.15s ease';
+                    
                     try { handle.setPointerCapture(e.pointerId); } catch(_){}
+                }, { passive: false });
+                
+                // 🆕 v13.3: iOS Safari의 long-press 컨텍스트 메뉴 차단
+                handle.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    return false;
                 });
+                handle.addEventListener('selectstart', (e) => {
+                    e.preventDefault();
+                    return false;
+                });
+                // touchstart에서도 preventDefault해서 iOS 기본 동작 차단
+                handle.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                }, { passive: false });
                 
                 handle.addEventListener('pointermove', (e) => {
                     if (!dragState || dragState.el !== item) return;
                     e.preventDefault();
                     dragState.currentY = e.clientY;
+                    
+                    // 🆕 v13.4: 카드가 손가락/마우스를 따라 움직임
+                    const deltaY = e.clientY - dragState.startY;
+                    item.style.transform = `translateY(${deltaY}px) scale(1.03) rotate(-1deg)`;
+                    item.style.transition = 'none'; // 드래그 중에는 transition 끄기 (즉각 반응)
                     
                     // 현재 포인터 위치 아래 timeline-item 찾기
                     const allItems = container.querySelectorAll('.timeline-item[data-place-index]');
@@ -8808,13 +8854,17 @@
                             overItem.classList.add('drag-over-bottom');
                         }
                     }
-                });
+                }, { passive: false });
                 
                 handle.addEventListener('pointerup', (e) => {
                     if (!dragState || dragState.el !== item) return;
                     e.preventDefault();
                     
                     console.log('[drag] pointerup at Y=', e.clientY);
+                    
+                    // 🆕 v13.4: transform 초기화 (재렌더링 전에 깔끔하게)
+                    item.style.transform = '';
+                    item.style.transition = '';
                     
                     // drop target 찾기
                     const allItems = container.querySelectorAll('.timeline-item[data-place-index]');
@@ -8848,6 +8898,9 @@
                 handle.addEventListener('pointercancel', () => {
                     if (!dragState || dragState.el !== item) return;
                     console.log('[drag] cancelled');
+                    // 🆕 v13.4: 취소 시에도 transform 초기화
+                    item.style.transform = '';
+                    item.style.transition = '';
                     item.classList.remove('dragging');
                     container.querySelectorAll('.timeline-item').forEach(it => 
                         it.classList.remove('drag-over-top','drag-over-bottom')
