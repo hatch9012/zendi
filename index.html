@@ -1123,6 +1123,62 @@
         .timeline-item.meal { border-left: 3px solid #d85a30; }
         .timeline-item.cafe { border-left: 3px solid #a06020; }
 
+        /* 🆕 v13: 드래그 앤 드롭 스타일 */
+        .timeline-item[draggable="true"] {
+            position: relative;
+            cursor: grab;
+            transition: all 0.2s ease;
+        }
+        .timeline-item[draggable="true"]:active {
+            cursor: grabbing;
+        }
+        .timeline-item.dragging {
+            opacity: 0.4;
+            transform: scale(0.97);
+            box-shadow: 0 8px 24px rgba(24,95,165,0.25);
+        }
+        .timeline-item.drag-over-top {
+            border-top: 3px dashed #185fa5;
+            margin-top: -3px;
+        }
+        .timeline-item.drag-over-bottom {
+            border-bottom: 3px dashed #185fa5;
+            margin-bottom: -3px;
+        }
+        .drag-handle {
+            position: absolute;
+            top: 50%;
+            right: 8px;
+            transform: translateY(-50%);
+            width: 32px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #888;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: grab;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+            background: rgba(0,0,0,0.03);
+            border-radius: 6px;
+            z-index: 2;
+        }
+        .drag-handle:active {
+            cursor: grabbing;
+            color: #185fa5;
+            background: rgba(24,95,165,0.15);
+        }
+        .drag-handle:hover {
+            color: #185fa5;
+            background: rgba(24,95,165,0.08);
+        }
+        .timeline-item .timeline-place {
+            padding-right: 30px; /* 드래그 핸들 공간 확보 */
+        }
+
         .timeline-time {
             display: flex;
             align-items: center;
@@ -8574,15 +8630,21 @@
                         </div>
                     `;
                 } else {
-                    // 여행지 (🆕 체류시간 편집 가능!)
+                    // 여행지 (🆕 체류시간 편집 가능! / 🆕 v13: 드래그로 순서 변경 가능)
                     placeIndex++;
                     const place = item.place;
                     totalCost += place.price || 0;
                     const isMeal = place.type === 'meal';
                     const isCafe = place.type === 'cafe';
                     
+                    // 🆕 v13: state.selectedPlaces에서의 실제 인덱스 찾기 (originalId 또는 id로 매칭)
+                    const placeIdxInState = state.selectedPlaces.findIndex(p => 
+                        p.originalId === place.id || p.id === place.id
+                    );
+                    
                     return `
-                        <div class="timeline-item ${isMeal ? 'meal' : isCafe ? 'cafe' : ''}" data-place-id="${place.id}">
+                        <div class="timeline-item ${isMeal ? 'meal' : isCafe ? 'cafe' : ''}" data-place-id="${place.id}" data-place-index="${placeIdxInState}">
+                            <div class="drag-handle" title="드래그해서 순서 변경">⋮⋮</div>
                             <div class="timeline-time">
                                 <div class="timeline-number ${isMeal ? 'meal' : isCafe ? 'cafe' : ''}">${placeIndex}</div>
                                 <div class="timeline-time-text">${startStr} - ${endStr}</div>
@@ -8666,10 +8728,168 @@
                 `${today.getFullYear()}년 ${today.getMonth()+1}월 ${today.getDate()}일 (${'일월화수목금토'[today.getDay()]})`;
             
             document.getElementById('planScreen').classList.add('show');
+            
+            // 🆕 v13: 드래그 앤 드롭 이벤트 활성화
+            enablePlanDragAndDrop();
         }
 
         function closeFinalPlan() {
             document.getElementById('planScreen').classList.remove('show');
+        }
+
+        // 🆕 v13.2: 드래그 앤 드롭 - Pointer Events 방식 (마우스/터치 통합, 더 안정적)
+        function enablePlanDragAndDrop() {
+            const container = document.getElementById('planBody');
+            if (!container) {
+                console.warn('[drag] planBody not found');
+                return;
+            }
+            const items = container.querySelectorAll('.timeline-item[data-place-index]');
+            console.log('[drag] enable: found', items.length, 'draggable items');
+            if (items.length < 2) return;
+            
+            let dragState = null; // { el, idx, startY, currentY }
+            
+            items.forEach(item => {
+                const handle = item.querySelector('.drag-handle');
+                if (!handle) {
+                    console.warn('[drag] no .drag-handle in item', item);
+                    return;
+                }
+                
+                handle.addEventListener('pointerdown', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    const idx = parseInt(item.dataset.placeIndex, 10);
+                    console.log('[drag] pointerdown on idx', idx);
+                    
+                    if (isNaN(idx) || idx < 0) {
+                        console.warn('[drag] invalid place-index', item.dataset.placeIndex);
+                        return;
+                    }
+                    
+                    dragState = {
+                        el: item,
+                        idx: idx,
+                        startY: e.clientY,
+                        currentY: e.clientY,
+                        pointerId: e.pointerId
+                    };
+                    
+                    item.classList.add('dragging');
+                    try { handle.setPointerCapture(e.pointerId); } catch(_){}
+                });
+                
+                handle.addEventListener('pointermove', (e) => {
+                    if (!dragState || dragState.el !== item) return;
+                    e.preventDefault();
+                    dragState.currentY = e.clientY;
+                    
+                    // 현재 포인터 위치 아래 timeline-item 찾기
+                    const allItems = container.querySelectorAll('.timeline-item[data-place-index]');
+                    allItems.forEach(it => it.classList.remove('drag-over-top','drag-over-bottom'));
+                    
+                    let overItem = null;
+                    allItems.forEach(it => {
+                        if (it === dragState.el) return;
+                        const rect = it.getBoundingClientRect();
+                        if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+                            overItem = it;
+                        }
+                    });
+                    
+                    if (overItem) {
+                        const rect = overItem.getBoundingClientRect();
+                        const midY = rect.top + rect.height / 2;
+                        if (e.clientY < midY) {
+                            overItem.classList.add('drag-over-top');
+                        } else {
+                            overItem.classList.add('drag-over-bottom');
+                        }
+                    }
+                });
+                
+                handle.addEventListener('pointerup', (e) => {
+                    if (!dragState || dragState.el !== item) return;
+                    e.preventDefault();
+                    
+                    console.log('[drag] pointerup at Y=', e.clientY);
+                    
+                    // drop target 찾기
+                    const allItems = container.querySelectorAll('.timeline-item[data-place-index]');
+                    let overItem = null;
+                    allItems.forEach(it => {
+                        if (it === dragState.el) return;
+                        const rect = it.getBoundingClientRect();
+                        if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+                            overItem = it;
+                        }
+                    });
+                    
+                    item.classList.remove('dragging');
+                    allItems.forEach(it => it.classList.remove('drag-over-top','drag-over-bottom'));
+                    try { handle.releasePointerCapture(e.pointerId); } catch(_){}
+                    
+                    if (overItem) {
+                        const targetIdx = parseInt(overItem.dataset.placeIndex, 10);
+                        const rect = overItem.getBoundingClientRect();
+                        const midY = rect.top + rect.height / 2;
+                        const insertBefore = e.clientY < midY;
+                        console.log('[drag] drop on idx', targetIdx, 'before?', insertBefore);
+                        reorderSelectedPlaces(dragState.idx, targetIdx, insertBefore);
+                    } else {
+                        console.log('[drag] no drop target');
+                    }
+                    
+                    dragState = null;
+                });
+                
+                handle.addEventListener('pointercancel', () => {
+                    if (!dragState || dragState.el !== item) return;
+                    console.log('[drag] cancelled');
+                    item.classList.remove('dragging');
+                    container.querySelectorAll('.timeline-item').forEach(it => 
+                        it.classList.remove('drag-over-top','drag-over-bottom')
+                    );
+                    dragState = null;
+                });
+            });
+        }
+        
+        // 🆕 v13: state.selectedPlaces 배열 순서 변경 후 플랜 다시 그리기
+        function reorderSelectedPlaces(fromIdx, toIdx, insertBefore) {
+            console.log('[reorder] called', {fromIdx, toIdx, insertBefore, 
+                                              selectedLen: state.selectedPlaces.length});
+            
+            if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0) {
+                console.warn('[reorder] invalid index, abort');
+                return;
+            }
+            if (fromIdx >= state.selectedPlaces.length || toIdx >= state.selectedPlaces.length) {
+                console.warn('[reorder] out of range, abort');
+                return;
+            }
+            
+            const arr = state.selectedPlaces;
+            const [moved] = arr.splice(fromIdx, 1);
+            console.log('[reorder] moved item:', moved.name || moved.id);
+            
+            // splice 후 인덱스 보정
+            let insertIdx = toIdx;
+            if (fromIdx < toIdx) insertIdx = toIdx - 1;
+            if (!insertBefore) insertIdx += 1;
+            insertIdx = Math.max(0, Math.min(insertIdx, arr.length));
+            
+            arr.splice(insertIdx, 0, moved);
+            console.log('[reorder] done. New order:', arr.map(p => p.name || p.id));
+            
+            // 플랜 재렌더링
+            openFinalPlan();
+            
+            if (typeof showToast === 'function') {
+                showToast('순서가 변경되었어요 · 시간이 자동 재계산됐어요');
+            }
         }
 
         // ========================================================================
