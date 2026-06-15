@@ -1159,6 +1159,27 @@
             transition: box-shadow 0.15s ease, opacity 0.15s ease;
             /* transform은 JS에서 직접 제어 (translateY + scale + rotate) */
         }
+        
+        /* 🆕 v13.5: SortableJS 시각 효과 클래스 */
+        /* 드래그 중 원본 자리에 남는 placeholder */
+        .timeline-item.sortable-ghost {
+            opacity: 0.25;
+            background: #e8f1fa;
+        }
+        /* 선택된 (잡힌) 카드 */
+        .timeline-item.sortable-chosen {
+            box-shadow: 0 12px 32px rgba(24,95,165,0.4),
+                        0 0 0 2px #185fa5;
+            z-index: 100;
+            cursor: grabbing !important;
+        }
+        /* 실제로 손가락을 따라 움직이는 카드 */
+        .timeline-item.sortable-drag {
+            opacity: 0.95;
+            transform: rotate(-1deg) scale(1.03);
+            box-shadow: 0 16px 40px rgba(24,95,165,0.5);
+            cursor: grabbing !important;
+        }
         .timeline-item.drag-over-top {
             border-top: 3px dashed #185fa5;
             margin-top: -3px;
@@ -2144,6 +2165,8 @@
             transform: translate(-50%, -50%) scale(1);
         }
     </style>
+    <!-- 🆕 v13.5: SortableJS - 검증된 드래그 앤 드롭 라이브러리 (모바일/PC 호환) -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
 <body>
     <div class="phone-container">
@@ -8759,161 +8782,66 @@
             document.getElementById('planScreen').classList.remove('show');
         }
 
-        // 🆕 v13.2: 드래그 앤 드롭 - Pointer Events 방식 (마우스/터치 통합, 더 안정적)
+        // 🆕 v13.5: SortableJS 기반 드래그 앤 드롭 (모바일/PC 검증된 라이브러리)
+        let _sortableInstance = null;
         function enablePlanDragAndDrop() {
             const container = document.getElementById('planBody');
             if (!container) {
                 console.warn('[drag] planBody not found');
                 return;
             }
-            const items = container.querySelectorAll('.timeline-item[data-place-index]');
-            console.log('[drag] enable: found', items.length, 'draggable items');
-            if (items.length < 2) return;
             
-            let dragState = null; // { el, idx, startY, currentY }
+            // 기존 인스턴스 정리 (openFinalPlan 재호출 시)
+            if (_sortableInstance) {
+                try { _sortableInstance.destroy(); } catch(_){}
+                _sortableInstance = null;
+            }
             
-            items.forEach(item => {
-                const handle = item.querySelector('.drag-handle');
-                if (!handle) {
-                    console.warn('[drag] no .drag-handle in item', item);
-                    return;
+            if (typeof Sortable === 'undefined') {
+                console.warn('[drag] SortableJS not loaded - CDN 차단 가능성');
+                return;
+            }
+            
+            const draggableCount = container.querySelectorAll('.timeline-item[data-place-index]').length;
+            console.log('[drag] SortableJS init: found', draggableCount, 'draggable items');
+            if (draggableCount < 2) return;
+            
+            _sortableInstance = Sortable.create(container, {
+                handle: '.drag-handle',
+                draggable: '.timeline-item[data-place-index]',
+                animation: 200,
+                forceFallback: false,
+                delay: 0,
+                delayOnTouchOnly: false,
+                touchStartThreshold: 5,
+                
+                // 시각 효과 클래스 (CSS에서 정의)
+                ghostClass: 'sortable-ghost',      // 자리비킨 placeholder
+                chosenClass: 'sortable-chosen',    // 선택된 카드
+                dragClass: 'sortable-drag',        // 드래그 중인 카드 (이동)
+                
+                onStart: function(evt) {
+                    console.log('[drag] start - fromIdx:', evt.oldDraggableIndex);
+                },
+                
+                onEnd: function(evt) {
+                    const fromIdx = evt.oldDraggableIndex;
+                    const toIdx = evt.newDraggableIndex;
+                    console.log('[drag] end - from:', fromIdx, 'to:', toIdx);
+                    
+                    if (fromIdx === toIdx) return;
+                    if (fromIdx == null || toIdx == null) return;
+                    
+                    // SortableJS는 이미 DOM을 옮겨놨음. state도 같은 순서로 동기화.
+                    reorderSelectedPlaces(fromIdx, toIdx);
                 }
-                
-                handle.addEventListener('pointerdown', (e) => {
-                    // 🆕 v13.3: iOS Safari가 long-press를 가로채지 않도록 적극 차단
-                    e.preventDefault();
-                    e.stopPropagation();
-                    
-                    const idx = parseInt(item.dataset.placeIndex, 10);
-                    console.log('[drag] pointerdown on idx', idx);
-                    
-                    if (isNaN(idx) || idx < 0) {
-                        console.warn('[drag] invalid place-index', item.dataset.placeIndex);
-                        return;
-                    }
-                    
-                    dragState = {
-                        el: item,
-                        idx: idx,
-                        startY: e.clientY,
-                        currentY: e.clientY,
-                        pointerId: e.pointerId
-                    };
-                    
-                    item.classList.add('dragging');
-                    // 🆕 v13.4: 드래그 시작 즉시 살짝 떠오르는 효과
-                    item.style.transform = 'scale(1.03) rotate(-1deg)';
-                    item.style.transition = 'transform 0.15s ease, box-shadow 0.15s ease';
-                    
-                    try { handle.setPointerCapture(e.pointerId); } catch(_){}
-                }, { passive: false });
-                
-                // 🆕 v13.3: iOS Safari의 long-press 컨텍스트 메뉴 차단
-                handle.addEventListener('contextmenu', (e) => {
-                    e.preventDefault();
-                    return false;
-                });
-                handle.addEventListener('selectstart', (e) => {
-                    e.preventDefault();
-                    return false;
-                });
-                // touchstart에서도 preventDefault해서 iOS 기본 동작 차단
-                handle.addEventListener('touchstart', (e) => {
-                    e.preventDefault();
-                }, { passive: false });
-                
-                handle.addEventListener('pointermove', (e) => {
-                    if (!dragState || dragState.el !== item) return;
-                    e.preventDefault();
-                    dragState.currentY = e.clientY;
-                    
-                    // 🆕 v13.4: 카드가 손가락/마우스를 따라 움직임
-                    const deltaY = e.clientY - dragState.startY;
-                    item.style.transform = `translateY(${deltaY}px) scale(1.03) rotate(-1deg)`;
-                    item.style.transition = 'none'; // 드래그 중에는 transition 끄기 (즉각 반응)
-                    
-                    // 현재 포인터 위치 아래 timeline-item 찾기
-                    const allItems = container.querySelectorAll('.timeline-item[data-place-index]');
-                    allItems.forEach(it => it.classList.remove('drag-over-top','drag-over-bottom'));
-                    
-                    let overItem = null;
-                    allItems.forEach(it => {
-                        if (it === dragState.el) return;
-                        const rect = it.getBoundingClientRect();
-                        if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-                            overItem = it;
-                        }
-                    });
-                    
-                    if (overItem) {
-                        const rect = overItem.getBoundingClientRect();
-                        const midY = rect.top + rect.height / 2;
-                        if (e.clientY < midY) {
-                            overItem.classList.add('drag-over-top');
-                        } else {
-                            overItem.classList.add('drag-over-bottom');
-                        }
-                    }
-                }, { passive: false });
-                
-                handle.addEventListener('pointerup', (e) => {
-                    if (!dragState || dragState.el !== item) return;
-                    e.preventDefault();
-                    
-                    console.log('[drag] pointerup at Y=', e.clientY);
-                    
-                    // 🆕 v13.4: transform 초기화 (재렌더링 전에 깔끔하게)
-                    item.style.transform = '';
-                    item.style.transition = '';
-                    
-                    // drop target 찾기
-                    const allItems = container.querySelectorAll('.timeline-item[data-place-index]');
-                    let overItem = null;
-                    allItems.forEach(it => {
-                        if (it === dragState.el) return;
-                        const rect = it.getBoundingClientRect();
-                        if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-                            overItem = it;
-                        }
-                    });
-                    
-                    item.classList.remove('dragging');
-                    allItems.forEach(it => it.classList.remove('drag-over-top','drag-over-bottom'));
-                    try { handle.releasePointerCapture(e.pointerId); } catch(_){}
-                    
-                    if (overItem) {
-                        const targetIdx = parseInt(overItem.dataset.placeIndex, 10);
-                        const rect = overItem.getBoundingClientRect();
-                        const midY = rect.top + rect.height / 2;
-                        const insertBefore = e.clientY < midY;
-                        console.log('[drag] drop on idx', targetIdx, 'before?', insertBefore);
-                        reorderSelectedPlaces(dragState.idx, targetIdx, insertBefore);
-                    } else {
-                        console.log('[drag] no drop target');
-                    }
-                    
-                    dragState = null;
-                });
-                
-                handle.addEventListener('pointercancel', () => {
-                    if (!dragState || dragState.el !== item) return;
-                    console.log('[drag] cancelled');
-                    // 🆕 v13.4: 취소 시에도 transform 초기화
-                    item.style.transform = '';
-                    item.style.transition = '';
-                    item.classList.remove('dragging');
-                    container.querySelectorAll('.timeline-item').forEach(it => 
-                        it.classList.remove('drag-over-top','drag-over-bottom')
-                    );
-                    dragState = null;
-                });
             });
         }
         
-        // 🆕 v13: state.selectedPlaces 배열 순서 변경 후 플랜 다시 그리기
-        function reorderSelectedPlaces(fromIdx, toIdx, insertBefore) {
-            console.log('[reorder] called', {fromIdx, toIdx, insertBefore, 
-                                              selectedLen: state.selectedPlaces.length});
+        // 🆕 v13.5: state.selectedPlaces 배열 순서 변경 후 플랜 다시 그리기
+        // SortableJS의 onEnd에서 호출. 단순 인덱스 이동.
+        function reorderSelectedPlaces(fromIdx, toIdx) {
+            console.log('[reorder] called', {fromIdx, toIdx, len: state.selectedPlaces.length});
             
             if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0) {
                 console.warn('[reorder] invalid index, abort');
@@ -8926,18 +8854,11 @@
             
             const arr = state.selectedPlaces;
             const [moved] = arr.splice(fromIdx, 1);
-            console.log('[reorder] moved item:', moved.name || moved.id);
+            arr.splice(toIdx, 0, moved);
             
-            // splice 후 인덱스 보정
-            let insertIdx = toIdx;
-            if (fromIdx < toIdx) insertIdx = toIdx - 1;
-            if (!insertBefore) insertIdx += 1;
-            insertIdx = Math.max(0, Math.min(insertIdx, arr.length));
-            
-            arr.splice(insertIdx, 0, moved);
             console.log('[reorder] done. New order:', arr.map(p => p.name || p.id));
             
-            // 플랜 재렌더링
+            // 플랜 재렌더링 (시간/이동시간 자동 재계산)
             openFinalPlan();
             
             if (typeof showToast === 'function') {
