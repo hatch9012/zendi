@@ -1,0 +1,1 @@
+{ "name": "@zendi/ui", "version": "14.0.0-alpha.1", "private": true, "main": "./src/index.ts", "types": "./src/index.ts", "peerDependencies": { "react": "^18.0.0" } }
