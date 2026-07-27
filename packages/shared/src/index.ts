@@ -8,6 +8,9 @@ export type {
   PlaceDetails,
 } from './types/place';
 
+export type { RegionMeta } from './data/regions';
+export { regions, regionMeta, REGION_ORDER, isRegion } from './data/regions';
+
 export {
   allPlaces,
   placesByRegion,

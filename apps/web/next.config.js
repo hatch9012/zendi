@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  transpilePackages: ['@zendi/shared'],
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'place.map.kakao.com' },
